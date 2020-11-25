@@ -4,8 +4,16 @@ dataset <-
            stringsAsFactors = F,
            header = T)
 
-server <- function(input, output) {
+click_output <- NULL
+
+server <- function(input, output, session) {
+  
+  # query <- parseQueryString(session$clientData$url_search)
   output$output_range_age <- renderUI({
+    # if (!is.null(query[['text']])) {
+    #   val <- query[['text']]
+    #   print(val)
+    # }
     min_age <- dataset %>% summarise(value = min(Age), .groups = 'drop')
     max_age <-
       dataset %>% summarise(value = max(Age), .groups = 'drop')
@@ -58,8 +66,30 @@ server <- function(input, output) {
     total_balance <- 0
     count_active <- 0
     
+    query <- parseQueryString(session$clientData$url_search)
+    
     if (!is.null(selected_range) &
-        !is.null(selected_gender) & !is.null(selected_number_prod)) {
+        !is.null(selected_gender) &
+        !is.null(selected_number_prod)) {
+      
+      if (!is.null(query[['gender']])) {
+        parameter <- query[['gender']]
+        
+        updateRadioButtons(session, "rdb_list_gender",
+                           selected = parameter
+        )
+        
+        output$urlText <- renderText({
+          paste(sep = "",
+                "protocol: ", session$clientData$url_protocol, "\n",
+                "hostname: ", session$clientData$url_hostname, "\n",
+                "pathname: ", session$clientData$url_pathname, "\n",
+                "port: ",     session$clientData$url_port,     "\n",
+                "search: ",   session$clientData$url_search,   "\n"
+          )
+        })
+        
+      }
       count_exited <-
         dataset %>% filter(Age >= selected_range[1] &
                              Age <= selected_range[2]) %>% filter(Gender == selected_gender) %>% filter(NumOfProducts == selected_number_prod) %>% nrow()
@@ -75,7 +105,8 @@ server <- function(input, output) {
     
     if (!is.null(checked_country) &
         !is.null(selected_range) &
-        !is.null(selected_gender) & !is.null(selected_number_prod)) {
+        !is.null(selected_gender) &
+        !is.null(selected_number_prod)) {
       count_exited <-
         dataset %>% filter(Geography %in% checked_country) %>% filter(Age >=
                                                                         selected_range[1] &
@@ -139,14 +170,16 @@ server <- function(input, output) {
     selected_number_prod <- input$num_list_prods
     
     if (!is.null(selected_range) &
-        !is.null(selected_gender) & !is.null(selected_number_prod)) {
+        !is.null(selected_gender) &
+        !is.null(selected_number_prod)) {
       data_graph <-
         dataset %>% filter(Age >= selected_range[1] &
                              Age <= selected_range[2]) %>% filter(Gender == selected_gender) %>% filter(NumOfProducts == selected_number_prod)
     }
     if (!is.null(checked_country) &
         !is.null(selected_range) &
-        !is.null(selected_gender) & !is.null(selected_number_prod)) {
+        !is.null(selected_gender) &
+        !is.null(selected_number_prod)) {
       data_graph <-
         dataset %>% filter(Geography %in% checked_country) %>% filter(Age >= selected_range[1] &
                                                                         Age <= selected_range[2]) %>% filter(Gender == selected_gender) %>% filter(NumOfProducts == selected_number_prod)
@@ -154,7 +187,8 @@ server <- function(input, output) {
     else{
       if (is.null(checked_country) &
           !is.null(selected_range) &
-          !is.null(selected_gender) & !is.null(selected_number_prod)) {
+          !is.null(selected_gender) &
+          !is.null(selected_number_prod)) {
         data_graph <-
           dataset  %>% filter(Age >= selected_range[1] &
                                 Age <= selected_range[2]) %>% filter(Gender == selected_gender) %>% filter(NumOfProducts == selected_number_prod)
@@ -166,6 +200,37 @@ server <- function(input, output) {
       }
     }
     
+    if (!is.null(input$mbrush)) {
+      df <-
+        brushedPoints(data_graph,
+                      input$mbrush,
+                      xvar = 'Age',
+                      yvar = 'EstimatedSalary')
+      out <- df %>%
+        select(Age, EstimatedSalary)
+      
+      click_output <<- out %>% dplyr::distinct()
+      output$table_output = DT::renderDataTable({
+        
+      brks <- quantile(click_output, probs = seq(.05, .95, .05), na.rm = TRUE)
+      clrs <- round(seq(255, 40, length.out = length(brks) + 1), 0) %>%
+        {paste0("rgb(255,", ., ",", ., ")")}
+      
+      datatable(click_output) %>% formatStyle(
+        'EstimatedSalary',
+        background = styleColorBar(range(click_output$EstimatedSalary), 'steelblue'),
+        backgroundSize = '100% 90%',
+        backgroundRepeat = 'no-repeat',
+        backgroundPosition = 'center'
+      ) %>%
+        formatStyle(
+          'Age', backgroundColor = styleInterval(brks, clrs)
+        )
+      })
+    }
+    
+    return(data_graph)
+    
   })
   
   output$render_plot <- renderPlot({
@@ -173,6 +238,7 @@ server <- function(input, output) {
            aes(x = Age, y = EstimatedSalary)) +
       geom_point(aes(colour = factor(Geography))) +
       labs(colour = "Geography")
+    
   })
   
   output$render_box_plot <- renderPlot({
@@ -186,29 +252,5 @@ server <- function(input, output) {
       geom_boxplot() +
       facet_wrap( ~ Geography)
   })
-  
-  
-  #creating the plotOutput content
-  
-  # output$revenuebyPrd <- renderPlot({
-  #     ggplot(data = recommendation,
-  #            aes(x=Product, y=Revenue, fill=factor(Region))) +
-  #         geom_bar(position = "dodge", stat = "identity") + ylab("Revenue (in Euros)") +
-  #         xlab("Product") + theme(legend.position="bottom"
-  #                                 ,plot.title = element_text(size=15, face="bold")) +
-  #         ggtitle("Revenue by Product") + labs(fill = "Region")
-  # })
-  #
-  #
-  # output$revenuebyRegion <- renderPlot({
-  #     ggplot(data = recommendation,
-  #            aes(x=Account, y=Revenue, fill=factor(Region))) +
-  #         geom_bar(position = "dodge", stat = "identity") + ylab("Revenue (in Euros)") +
-  #         xlab("Account") + theme(legend.position="bottom"
-  #                                 ,plot.title = element_text(size=15, face="bold")) +
-  #         ggtitle("Revenue by Region") + labs(fill = "Region")
-  # })
-  
-  
   
 }
