@@ -1,4 +1,5 @@
 
+
 dataset <-
   read.csv('bank_churn_db.csv',
            stringsAsFactors = F,
@@ -7,13 +8,7 @@ dataset <-
 click_output <- NULL
 
 server <- function(input, output, session) {
-  
-  # query <- parseQueryString(session$clientData$url_search)
   output$output_range_age <- renderUI({
-    # if (!is.null(query[['text']])) {
-    #   val <- query[['text']]
-    #   print(val)
-    # }
     min_age <- dataset %>% summarise(value = min(Age), .groups = 'drop')
     max_age <-
       dataset %>% summarise(value = max(Age), .groups = 'drop')
@@ -21,7 +16,7 @@ server <- function(input, output, session) {
       "slide_range_age",
       "Select a range age:",
       min = min_age$value,
-      max = max_age$value,
+      max = max_age$value - 2,
       value = c(40, 60)
     )
   })
@@ -35,7 +30,7 @@ server <- function(input, output, session) {
   })
   
   output$output_list_number_prods <- renderUI({
-    count_prods <- dataset %>% distinct(NumOfProducts) %>% nrow()
+    count_prods <- dataset %>% distinct(NumOfProducts) %>% nrow() - 2
     min_count_prods <-
       dataset %>% summarise(value = min(NumOfProducts), .groups = 'drop')
     max_count_prods <-
@@ -65,31 +60,56 @@ server <- function(input, output, session) {
     count_exited <- 0
     total_balance <- 0
     count_active <- 0
-    
-    query <- parseQueryString(session$clientData$url_search)
+    queryString <- ""
     
     if (!is.null(selected_range) &
         !is.null(selected_gender) &
         !is.null(selected_number_prod)) {
+      query <- parseQueryString(session$clientData$url_search)
+      if (is.null(query$minAge)) {
+        queryString <-
+          paste0(
+            "?minAge=",
+            selected_range[1],
+            "&maxAge=",
+            selected_range[2],
+            "&gender=",
+            selected_gender,
+            "&numProducts=",
+            selected_number_prod
+          )
+      }
+      else{
+        queryString <-
+          paste0(
+            "?minAge=",
+            query$minAge,
+            "&maxAge=",
+            query$maxAge,
+            "&gender=",
+            query$gender,
+            "&numProducts=",
+            query$numProducts
+          )
+      }
       
-      if (!is.null(query[['gender']])) {
-        parameter <- query[['gender']]
+      updateQueryString(queryString)
+      
+      if (!is.null(query$minAge) &
+          !is.null(query$maxAge) &
+          !is.null(query$gender) & !is.null(query$numProducts)) {
+        updateSliderInput(session,
+                          "slide_range_age",
+                          value = c(query$minAge, query$maxAge))
         
         updateRadioButtons(session, "rdb_list_gender",
-                           selected = parameter
-        )
+                           selected = query$gender)
         
-        output$urlText <- renderText({
-          paste(sep = "",
-                "protocol: ", session$clientData$url_protocol, "\n",
-                "hostname: ", session$clientData$url_hostname, "\n",
-                "pathname: ", session$clientData$url_pathname, "\n",
-                "port: ",     session$clientData$url_port,     "\n",
-                "search: ",   session$clientData$url_search,   "\n"
-          )
-        })
+        updateNumericInput(session, "num_list_prods",
+                           value = query$numProducts)
         
       }
+      
       count_exited <-
         dataset %>% filter(Age >= selected_range[1] &
                              Age <= selected_range[2]) %>% filter(Gender == selected_gender) %>% filter(NumOfProducts == selected_number_prod) %>% nrow()
@@ -161,6 +181,28 @@ server <- function(input, output, session) {
       )
       
     })
+    
+    output$urlText <- renderText({
+      paste(
+        sep = "",
+        "protocol: ",
+        session$clientData$url_protocol,
+        "\n",
+        "hostname: ",
+        session$clientData$url_hostname,
+        "\n",
+        "pathname: ",
+        session$clientData$url_pathname,
+        "\n",
+        "port: ",
+        session$clientData$url_port,
+        "\n",
+        "search: ",
+        queryString,
+        "\n"
+      )
+    })
+    
   })
   
   data_plot <- reactive({
@@ -211,21 +253,24 @@ server <- function(input, output, session) {
       
       click_output <<- out %>% dplyr::distinct()
       output$table_output = DT::renderDataTable({
+        brks <-
+          quantile(click_output,
+                   probs = seq(.05, .95, .05),
+                   na.rm = TRUE)
+        clrs <-
+          round(seq(255, 40, length.out = length(brks) + 1), 0) %>%
+          {
+            paste0("rgb(255,", ., ",", ., ")")
+          }
         
-      brks <- quantile(click_output, probs = seq(.05, .95, .05), na.rm = TRUE)
-      clrs <- round(seq(255, 40, length.out = length(brks) + 1), 0) %>%
-        {paste0("rgb(255,", ., ",", ., ")")}
-      
-      datatable(click_output) %>% formatStyle(
-        'EstimatedSalary',
-        background = styleColorBar(range(click_output$EstimatedSalary), 'steelblue'),
-        backgroundSize = '100% 90%',
-        backgroundRepeat = 'no-repeat',
-        backgroundPosition = 'center'
-      ) %>%
-        formatStyle(
-          'Age', backgroundColor = styleInterval(brks, clrs)
-        )
+        datatable(click_output) %>% formatStyle(
+          'EstimatedSalary',
+          background = styleColorBar(range(click_output$EstimatedSalary), 'steelblue'),
+          backgroundSize = '100% 90%',
+          backgroundRepeat = 'no-repeat',
+          backgroundPosition = 'center'
+        ) %>%
+          formatStyle('Age', backgroundColor = styleInterval(brks, clrs))
       })
     }
     
@@ -250,7 +295,7 @@ server <- function(input, output, session) {
              group = 1
            )) +
       geom_boxplot() +
-      facet_wrap( ~ Geography)
+      facet_wrap(~ Geography)
   })
   
 }
